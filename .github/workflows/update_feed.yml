@@ -28,14 +28,14 @@ jobs:
 
       - name: Generate RSS feeds
         run: |
-          python generate_feed.py
-          python generate_esesja.py
-          python generate_terazteatr.py
+          python generate_feed.py || true
+          python generate_esesja.py || true
+          python generate_terazteatr.py || true
 
       - name: Commit and push changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]"
-          git add iflscience_feed.xml esesja_feed.xml terazteatr_feed.xml
+          git add *.xml || true
           git commit -m "Auto-update RSS feeds" || exit 0
           git push

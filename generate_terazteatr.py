@@ -13,8 +13,12 @@ def generate_terazteatr_rss(output_filename="terazteatr_feed.xml"):
     }
 
     print("Fetching news from TerazTeatr...")
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"Error fetching TerazTeatr: {e}")
+        return
 
     soup = BeautifulSoup(response.text, "html.parser")
 

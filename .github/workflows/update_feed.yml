@@ -30,11 +30,12 @@ jobs:
         run: |
           python generate_feed.py
           python generate_esesja.py
+          python generate_terazteatr.py
 
       - name: Commit and push changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]"
-          git add iflscience_feed.xml esesja_feed.xml
+          git add iflscience_feed.xml esesja_feed.xml terazteatr_feed.xml
           git commit -m "Auto-update RSS feeds" || exit 0
           git push

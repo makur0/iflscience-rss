@@ -31,6 +31,7 @@ jobs:
           python generate_feed.py || true
           python generate_esesja.py || true
           python generate_terazteatr.py || true
+          python generate_IMDB.py || true
 
       - name: Commit and push changes
         run: |

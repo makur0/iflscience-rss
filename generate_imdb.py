@@ -1,68 +1,118 @@
-import requests
-from bs4 import BeautifulSoup
+import re
 from feedgen.feed import FeedGenerator
-import urllib3
+from playwright.sync_api import sync_playwright
 
-# Suppress SSL warnings in case the site has strict/legacy SSL
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+IMDB_URL = "https://www.imdb.com/user/p.6zkvgpyeii72pau2ldg3lh3dgy/ratings/"
+MAX_ITEMS_TO_CHECK = 25
 
-def generate_rss(output_filename="IMDB_feed.xml"):
-    url = "https://www.imdb.com/user/p.6zkvgpyeii72pau2ldg3lh3dgy/ratings/"
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        )
-    }
+def generate_imdb_rss(output_filename="imdb_feed.xml"):
+    print("Fetching IMDb ratings with Playwright...")
 
     fg = FeedGenerator()
-    fg.title("Site Name - RSS")
-    fg.link(href=url, rel="alternate")
-    fg.description("RSS Feed for Site Name")
+    fg.title("IMDb Ratings - malgorzata-kurowska")
+    fg.link(href=IMDB_URL, rel="alternate")
+    fg.description("Latest rated movies and TV shows by malgorzata-kurowska on IMDb")
     fg.language("en")
 
-    seen_links = set()
-    articles_found = 0
+    items_found = 0
 
-    try:
-        response = requests.get(url, headers=headers, timeout=20, verify=False)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox"
+            ]
+        )
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800},
+            locale="en-US"
+        )
+        page = context.new_page()
+        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-        for a_tag in soup.find_all("a", href=True):
-            href = a_tag["href"]
+        try:
+            page.goto(IMDB_URL, timeout=60000)
 
-            # Fix relative links
-            if href.startswith("/"):
-                href = "https://EXAMPLE.COM" + href
+            # Dismiss Cookie Banner if it pops up
+            try:
+                page.locator("button[data-testid='accept-button'], #onetrust-accept-btn-handler").click(timeout=3000)
+            except Exception:
+                pass
 
-            title = a_tag.get_text(strip=True)
+            # Wait for list items to appear
+            item_locator = page.locator("li.ipc-metadata-list-summary-item")
+            item_locator.first.wait_for(state="visible", timeout=30000)
 
-            # ADJUST THIS FILTER to match article URLs on that specific site:
-            if "article-keyword" in href and href not in seen_links and len(title) > 10:
-                seen_links.add(href)
-                articles_found += 1
+            total_found = item_locator.count()
+            check_limit = min(total_found, MAX_ITEMS_TO_CHECK)
+
+            for i in range(check_limit):
+                item = item_locator.nth(i)
+
+                # 1. Title & URL
+                title_loc = item.locator("a.ipc-title-link-wrapper")
+                if title_loc.count() == 0:
+                    continue
+
+                raw_title = title_loc.first.inner_text().strip()
+                clean_title = re.sub(r'^\d+\.\s*', '', raw_title)
+
+                href = title_loc.first.get_attribute("href")
+                if not href or "/title/" not in href:
+                    continue
+
+                movie_id = href.split("/title/")[1].split("/")[0]
+                movie_url = f"https://www.imdb.com/title/{movie_id}/"
+
+                # 2. Extract User Rating
+                user_rating_loc = item.locator(
+                    "span.ipc-rating-star--user, "
+                    "[data-testid='rating-button__user-rating'], "
+                    ".ipc-rating-prompt__rating"
+                )
+
+                user_rating = "N/A"
+                if user_rating_loc.count() > 0:
+                    user_rating = user_rating_loc.first.inner_text().strip()
+                else:
+                    all_stars = item.locator("span.ipc-rating-star")
+                    if all_stars.count() >= 2:
+                        user_rating = all_stars.nth(1).inner_text().strip()
+                    elif all_stars.count() == 1:
+                        user_rating = all_stars.first.inner_text().strip()
+
+                user_rating = user_rating.replace("\n", " ").replace("Rate", "").strip()
+                if not user_rating:
+                    user_rating = "N/A"
+
+                feed_title = f"{clean_title} (Rating: {user_rating})" if user_rating != "N/A" else clean_title
 
                 fe = fg.add_entry()
-                fe.id(href)
-                fe.title(title)
-                fe.link(href=href)
-                fe.description(title)
+                fe.id(movie_url)
+                fe.title(feed_title)
+                fe.link(href=movie_url)
+                fe.description(f"Title: {clean_title} | User Rating: {user_rating}")
 
-    except Exception as e:
-        print(f"Error fetching site: {e}")
+                items_found += 1
 
-    # Fallback to prevent empty feed errors
-    if articles_found == 0:
+        except Exception as e:
+            print(f"Error scraping IMDb with Playwright: {e}")
+        finally:
+            browser.close()
+
+    # Fallback entry
+    if items_found == 0:
         fe = fg.add_entry()
-        fe.id(url)
-        fe.title("Site Name - RSS")
-        fe.link(href=url)
-        fe.description("Visit site directly.")
+        fe.id(IMDB_URL)
+        fe.title("IMDb Ratings - malgorzata-kurowska")
+        fe.link(href=IMDB_URL)
+        fe.description("Visit IMDb to view ratings.")
 
     fg.rss_file(output_filename)
-    print(f"Done! Generated '{output_filename}' with {articles_found} articles.")
+    print(f"Done! Generated '{output_filename}' with {items_found} items.")
 
 if __name__ == "__main__":
-    generate_rss()
+    generate_imdb_rss()

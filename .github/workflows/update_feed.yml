@@ -26,12 +26,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Install Playwright Chromium
+        run: |
+          playwright install --with-deps chromium
+
       - name: Generate RSS feeds
         run: |
           python generate_feed.py || true
           python generate_esesja.py || true
           python generate_terazteatr.py || true
-          python generate_IMDB.py || true
+          python generate_imdb.py || true
 
       - name: Commit and push changes
         run: |
